@@ -1,21 +1,26 @@
 declare var mat4: any;
 
 let VSHADER_SRC = `
-attribute vec3 a_Position;
-attribute vec4 a_Color;
+attribute vec3 position;
+attribute vec3 normal;
+attribute vec4 color;
 uniform   mat4 mvpMatrix;
-varying vec4 v_Color;
+uniform   mat4 invMatrix;
+uniform   vec3 lightDirection;
+varying   vec4 vColor;
 
-void main(){
-    v_Color = a_Color; 
-    gl_Position = mvpMatrix * vec4(a_Position, 1.0);
+void main(void){
+    vec3  invLight = normalize(invMatrix * vec4(lightDirection, 0.0)).xyz;
+    float diffuse  = clamp(dot(normal, invLight), 0.1, 1.0);
+    vColor         = color * vec4(vec3(diffuse), 1.0);
+    gl_Position    = mvpMatrix * vec4(position, 1.0);
 }`;
 
 let FSHADER_SRC = `
 precision mediump float;
-varying vec4 v_Color;
+varying vec4 vColor;
 void main(){
-    gl_FragColor = v_Color;   
+    gl_FragColor = vColor;   
 }`;
 
 
@@ -33,6 +38,7 @@ function main() {
     var pMatrix = mat4.create();
     var tmpMatrix = mat4.create();
     var mvpMatrix = mat4.create();
+    var invMatrix = mat4.create();
 
     gl = getWebGLContext(canvas);
 
@@ -43,29 +49,31 @@ function main() {
     
     var program = initShaders(gl, VSHADER_SRC, FSHADER_SRC);
 
-    var vertexPositionAttribute = gl.getAttribLocation(program, "a_Position");
-
     // attributeLocationの取得
-    var attLocation = new Array(2);
-    attLocation[0] = gl.getAttribLocation(program, "a_Position");
-    attLocation[1] = gl.getAttribLocation(program, "a_Color");
+    var attLocation = new Array();
+    attLocation[0] = gl.getAttribLocation(program, "position");
+    attLocation[1] = gl.getAttribLocation(program, "normal");
+    attLocation[2] = gl.getAttribLocation(program, "color");
 
     // attributeの要素数(この要素はxyzの3要素)
-    var attStride = new Array(2);
+    var attStride = new Array();
     attStride[0] = 3;
-    attStride[1] = 4;
+    attStride[1] = 3;
+    attStride[2] = 4;
 
     // トーラスのデータを作成する
     var torusData = torus(32, 32, 1.0, 2.0);
     var position = torusData[0];
-    var color = torusData[1];
-    var index = torusData[2];
+    var normal = torusData[1];
+    var color = torusData[2];
+    var index = torusData[3];
 
     var position_vbo = createVBO(gl, position);
+    var normal_vbo = createVBO(gl, normal);
     var color_vbo = createVBO(gl, color);
     // attribute属性を有効にする
     // attribute属性を登録
-    set_attribute(gl, [position_vbo, color_vbo], attLocation, attStride);
+    set_attribute(gl, [position_vbo, normal_vbo, color_vbo], attLocation, attStride);
 
     // iboの作成
     var ibo = create_ibo(gl, index);
@@ -73,13 +81,19 @@ function main() {
     // IBOをバインドして登録する
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ibo);
     // uniformLocationの取得
-    var uniLocation = gl.getUniformLocation(program, 'mvpMatrix');
+    var uniLocation = new Array();
+    uniLocation[0] = gl.getUniformLocation(program, 'mvpMatrix');
+    uniLocation[1] = gl.getUniformLocation(program, 'invMatrix');
+    uniLocation[2] = gl.getUniformLocation(program, 'lightDirection');
 
     // ビュー変換行列
     mat4.lookAt(vMatrix, [0.0, 0.0, 20.0], [0, 0, 0], [0, 1, 0]);
     // プロジェクション座標変換行列
     mat4.perspective(pMatrix, 45, canvas.width/canvas.height, 0.1, 1000);
     mat4.mul(tmpMatrix, pMatrix, vMatrix);
+
+    // 平行光源の向き
+    var lightDirection = new Float32Array([-0.5, 0.5, 0.5]);
 
     var render_count:number = 0;
     function render_update(timestamp: any) {
@@ -96,12 +110,16 @@ function main() {
         
         // モデル2はY軸を中心に回転する
         mat4.identity(mMatrix);
-        mat4.translate(mMatrix, mMatrix, [1.0, -1.0, 0.0]);
         mat4.rotate(mMatrix, mMatrix, rad, [0, 1, 1]);    
-
         // モデル2の座標変換行列と描画
         mat4.mul(mvpMatrix, tmpMatrix, mMatrix);
-        gl.uniformMatrix4fv(uniLocation, false, mvpMatrix);
+
+        // 逆行列
+        mat4.invert(invMatrix, mMatrix);
+
+        gl.uniformMatrix4fv(uniLocation[0], false, mvpMatrix);
+        gl.uniformMatrix4fv(uniLocation[1], false, invMatrix);
+        gl.uniform3fv(uniLocation[2], lightDirection);
         gl.drawElements(gl.TRIANGLES, index.length, gl.UNSIGNED_SHORT, 0);
 
         gl.flush();
@@ -137,8 +155,12 @@ function initShaders(gl: WebGLRenderingContext, vs: string, fs: string): WebGLPr
     gl.attachShader(program, v_shader);
     gl.attachShader(program, f_shader);
     gl.linkProgram(program);
-    // TODO linkチェック
-    gl.useProgram(program);
+  	if(gl.getProgramParameter(program, gl.LINK_STATUS)){
+        gl.useProgram(program);
+        return program;
+    }else{
+        alert(gl.getProgramInfoLog(program));
+    }    
     return program;
 }
 
@@ -188,7 +210,8 @@ function create_ibo(gl: WebGLRenderingContext, data: Array<number>): WebGLBuffer
 
 // トーラスの頂点データを作成する
 function torus(row: number, column: number, irad: number, orad: number){
-    var pos = new Array(), col = new Array(), idx = new Array();
+    var pos = new Array(), nor = new Array(),
+        col = new Array(), idx = new Array();
     for(var i = 0; i <= row; i++){
         var r = Math.PI * 2 / row * i;
         var rr = Math.cos(r);
@@ -198,7 +221,10 @@ function torus(row: number, column: number, irad: number, orad: number){
             var tx = (rr * irad + orad) * Math.cos(tr);
             var ty = ry * irad;
             var tz = (rr * irad + orad) * Math.sin(tr);
+            var rx = rr * Math.cos(tr);
+            var rz = rr * Math.sin(tr);
             pos.push(tx, ty, tz);
+            nor.push(rx, ry, rz);
             var tc = hsva(360 / column * ii, 1, 1, 1);
             col.push(tc[0], tc[1], tc[2], tc[3]);
         }
@@ -210,7 +236,7 @@ function torus(row: number, column: number, irad: number, orad: number){
             idx.push(r + column + 1, r + column + 2, r + 1);
         }
     }
-    return [pos, col, idx];
+    return [pos, nor, col, idx];
 }
 
 function hsva(h:number, s:number, v:number, a:number){
