@@ -63,14 +63,7 @@ function main() {
     var color_vbo = createVBO(gl, vertex_color);
     // attribute属性を有効にする
     // attribute属性を登録
-    gl.bindBuffer(gl.ARRAY_BUFFER, position_vbo);
-    gl.enableVertexAttribArray(attLocation[0]);
-    gl.vertexAttribPointer(attLocation[0], attStride[0], gl.FLOAT, false, 0, 0);
-
-    gl.bindBuffer(gl.ARRAY_BUFFER, color_vbo);
-    gl.enableVertexAttribArray(attLocation[1]);
-    gl.vertexAttribPointer(attLocation[1], attStride[1], gl.FLOAT, false, 0, 0);
-
+    set_attribute(gl, [position_vbo, color_vbo], attLocation, attStride);
 
     // 行列変換処理
     var mMatrix = mat4.create();
@@ -156,4 +149,18 @@ function createVBO(gl: WebGLRenderingContext , data: Array<number>): WebGLBuffer
     return vbo;
 }
 
+// VBOをバインドし登録する関数
+function set_attribute(gl: WebGLRenderingContext, vbo: Array<WebGLRenderbuffer>, attL: Array<number>, attS: Array<number>){
+    // 引数として受け取った配列を処理する
+    for(var i in vbo){
+        // バッファをバインドする
+        gl.bindBuffer(gl.ARRAY_BUFFER, vbo[i]);
+        
+        // attributeLocationを有効にする
+        gl.enableVertexAttribArray(attL[i]);
+        
+        // attributeLocationを通知し登録する
+        gl.vertexAttribPointer(attL[i], attS[i], gl.FLOAT, false, 0, 0);
+    }
+}
 main();
