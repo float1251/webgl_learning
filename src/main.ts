@@ -35,6 +35,11 @@ function main() {
     var mvpMatrix = mat4.create();
 
     gl = getWebGLContext(canvas);
+
+    // カリングと深度テストを有効に 	
+    gl.enable(gl.DEPTH_TEST);
+    gl.depthFunc(gl.LEQUAL);
+    gl.enable(gl.CULL_FACE);
     
     var program = initShaders(gl, VSHADER_SRC, FSHADER_SRC);
 
@@ -50,28 +55,14 @@ function main() {
     attStride[0] = 3;
     attStride[1] = 4;
 
-    // 頂点データ
-    var vertex_position = [
-        0.0, 1.0, 0.0,
-        1.0, 0.0, 0.0,
-       -1.0, 0.0, 0.0,
-        0.0, -1.0, 0.0
-    ];
+    // トーラスのデータを作成する
+    var torusData = torus(32, 32, 1.0, 2.0);
+    var position = torusData[0];
+    var color = torusData[1];
+    var index = torusData[2];
 
-    var vertex_color = [
-        1.0, 0.0, 0.0, 1.0,
-        0.0, 1.0, 0.0, 1.0,
-        0.0, 0.0, 1.0, 1.0,
-        1.0, 1.0, 1.0, 1.0
-    ]
-
-    var index = [
-        0, 1, 2,
-        1, 2, 3
-    ]
-
-    var position_vbo = createVBO(gl, vertex_position);
-    var color_vbo = createVBO(gl, vertex_color);
+    var position_vbo = createVBO(gl, position);
+    var color_vbo = createVBO(gl, color);
     // attribute属性を有効にする
     // attribute属性を登録
     set_attribute(gl, [position_vbo, color_vbo], attLocation, attStride);
@@ -85,9 +76,9 @@ function main() {
     var uniLocation = gl.getUniformLocation(program, 'mvpMatrix');
 
     // ビュー変換行列
-    mat4.lookAt(vMatrix, [0.0, 0.0, 3.0], [0, 0, 0], [0,1,0]);
+    mat4.lookAt(vMatrix, [0.0, 0.0, 20.0], [0, 0, 0], [0, 1, 0]);
     // プロジェクション座標変換行列
-    mat4.perspective(pMatrix, 90, canvas.width/canvas.height, 0.1, 1000);
+    mat4.perspective(pMatrix, 45, canvas.width/canvas.height, 0.1, 1000);
     mat4.mul(tmpMatrix, pMatrix, vMatrix);
 
     var render_count:number = 0;
@@ -103,35 +94,12 @@ function main() {
         // ラジアンを算出
         var rad = (render_count%360) * Math.PI / 180;
         
-        // モデル1は円の動きを描き、移動する
-        var x = Math.cos(rad);
-        var y = Math.sin(rad);
-        mat4.identity(mMatrix);
-        mat4.translate(mMatrix, mMatrix, [x, y+1.0, 0.0]);
-    
-        // モデル1の座標変換行列と、レンダリング
-        // モデルxビューxプロジェクション
-        mat4.mul(mvpMatrix, tmpMatrix, mMatrix);
-        gl.uniformMatrix4fv(uniLocation, false, mvpMatrix);
-        gl.drawElements(gl.TRIANGLES, index.length, gl.UNSIGNED_SHORT, 0);
-
         // モデル2はY軸を中心に回転する
         mat4.identity(mMatrix);
         mat4.translate(mMatrix, mMatrix, [1.0, -1.0, 0.0]);
-        mat4.rotateY(mMatrix, mMatrix, rad);    
+        mat4.rotate(mMatrix, mMatrix, rad, [0, 1, 1]);    
 
         // モデル2の座標変換行列と描画
-        mat4.mul(mvpMatrix, tmpMatrix, mMatrix);
-        gl.uniformMatrix4fv(uniLocation, false, mvpMatrix);
-        gl.drawElements(gl.TRIANGLES, index.length, gl.UNSIGNED_SHORT, 0);
-
-        // モデル3は拡大縮小する
-        var s = Math.sin(rad) + 1.0;
-        mat4.identity(mMatrix);
-        mat4.translate(mMatrix, mMatrix, [-1.0, -1.0, 0.0]);
-        mat4.scale(mMatrix, mMatrix, [s, s, s]);
-        
-        // モデル3の座標変換行列と描画
         mat4.mul(mvpMatrix, tmpMatrix, mMatrix);
         gl.uniformMatrix4fv(uniLocation, false, mvpMatrix);
         gl.drawElements(gl.TRIANGLES, index.length, gl.UNSIGNED_SHORT, 0);
@@ -217,4 +185,52 @@ function create_ibo(gl: WebGLRenderingContext, data: Array<number>): WebGLBuffer
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, null);
     return ibo;
 }
+
+// トーラスの頂点データを作成する
+function torus(row: number, column: number, irad: number, orad: number){
+    var pos = new Array(), col = new Array(), idx = new Array();
+    for(var i = 0; i <= row; i++){
+        var r = Math.PI * 2 / row * i;
+        var rr = Math.cos(r);
+        var ry = Math.sin(r);
+        for(var ii = 0; ii <= column; ii++){
+            var tr = Math.PI * 2 / column * ii;
+            var tx = (rr * irad + orad) * Math.cos(tr);
+            var ty = ry * irad;
+            var tz = (rr * irad + orad) * Math.sin(tr);
+            pos.push(tx, ty, tz);
+            var tc = hsva(360 / column * ii, 1, 1, 1);
+            col.push(tc[0], tc[1], tc[2], tc[3]);
+        }
+    }
+    for(i = 0; i < row; i++){
+        for(ii = 0; ii < column; ii++){
+            r = (column + 1) * i + ii;
+            idx.push(r, r + column + 1, r + 1);
+            idx.push(r + column + 1, r + column + 2, r + 1);
+        }
+    }
+    return [pos, col, idx];
+}
+
+function hsva(h:number, s:number, v:number, a:number){
+    if(s > 1 || v > 1 || a > 1){return;}
+    var th = h % 360;
+    var i = Math.floor(th / 60);
+    var f = th / 60 - i;
+    var m = v * (1 - s);
+    var n = v * (1 - s * f);
+    var k = v * (1 - s * (1 - f));
+    var color = new Array();
+    if(!(s > 0) && !(s < 0)){
+        color.push(v, v, v, a); 
+    } else {
+        var r = new Array(v, n, m, m, k, v);
+        var g = new Array(k, v, v, n, m, m);
+        var b = new Array(m, m, k, v, v, n);
+        color.push(r[i], g[i], b[i], a);
+    }
+    return color;
+}
+
 main();
