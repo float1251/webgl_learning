@@ -7,12 +7,18 @@ attribute vec4 color;
 uniform   mat4 mvpMatrix;
 uniform   mat4 invMatrix;
 uniform   vec3 lightDirection;
+uniform   vec3 eyeDirection;
+uniform   vec4 ambientColor;
 varying   vec4 vColor;
 
 void main(void){
     vec3  invLight = normalize(invMatrix * vec4(lightDirection, 0.0)).xyz;
+    vec3  invEye   = normalize(invMatrix * vec4(eyeDirection, 0.0)).xyz;
+    vec3  halfLE   = normalize(invLight + invEye);
     float diffuse  = clamp(dot(normal, invLight), 0.1, 1.0);
-    vColor         = color * vec4(vec3(diffuse), 1.0);
+    float specular = pow(clamp(dot(normal, halfLE), 0.0, 1.0), 50.0);
+    vec4  light    = color * vec4(vec3(diffuse), 1.0) + vec4(vec3(specular), 1.0);
+    vColor         = light + ambientColor;
     gl_Position    = mvpMatrix * vec4(position, 1.0);
 }`;
 
@@ -85,6 +91,8 @@ function main() {
     uniLocation[0] = gl.getUniformLocation(program, 'mvpMatrix');
     uniLocation[1] = gl.getUniformLocation(program, 'invMatrix');
     uniLocation[2] = gl.getUniformLocation(program, 'lightDirection');
+    uniLocation[3] = gl.getUniformLocation(program, 'eyeDirection');
+    uniLocation[4] = gl.getUniformLocation(program, 'ambientColor');
 
     // ビュー変換行列
     mat4.lookAt(vMatrix, [0.0, 0.0, 20.0], [0, 0, 0], [0, 1, 0]);
@@ -94,6 +102,10 @@ function main() {
 
     // 平行光源の向き
     var lightDirection = new Float32Array([-0.5, 0.5, 0.5]);
+    // 環境光(ambientLight)の色設定
+    var ambientColor = new Float32Array([0.1, 0.1, 0.1, 1.0]);
+    // 視線ベクトル
+    var eyeDirection = new Float32Array([0.0, 0.0, 20.0]);
 
     var render_count:number = 0;
     function render_update(timestamp: any) {
@@ -120,6 +132,8 @@ function main() {
         gl.uniformMatrix4fv(uniLocation[0], false, mvpMatrix);
         gl.uniformMatrix4fv(uniLocation[1], false, invMatrix);
         gl.uniform3fv(uniLocation[2], lightDirection);
+        gl.uniform3fv(uniLocation[3], eyeDirection);
+        gl.uniform4fv(uniLocation[4], lightDirection);
         gl.drawElements(gl.TRIANGLES, index.length, gl.UNSIGNED_SHORT, 0);
 
         gl.flush();
