@@ -1,37 +1,31 @@
 declare var mat4: any;
 
+var texture: WebGLTexture;
+
 let VSHADER_SRC = `
 attribute vec3 position;
-attribute vec3 normal;
 attribute vec4 color;
+attribute vec2 textureCoord;
 uniform   mat4 mvpMatrix;
-varying   vec3 vNormal;
 varying   vec4 vColor;
+varying   vec2 vTextureCoord;
 
 void main(void){
-    vNormal     = normal;
     vColor      = color;
+    vTextureCoord = textureCoord;
     gl_Position = mvpMatrix * vec4(position, 1.0);
 }`;
 
 let FSHADER_SRC = `
 precision mediump float;
 
-uniform mat4 invMatrix;
-uniform vec3 lightDirection;
-uniform vec3 eyeDirection;
-uniform vec4 ambientColor;
-varying vec3 vNormal;
+uniform sampler2D texture;
 varying vec4 vColor;
+varying vec2 vTextureCoord;
 
 void main(void){
-    vec3  invLight  = normalize(invMatrix * vec4(lightDirection, 0.0)).xyz;
-    vec3  invEye    = normalize(invMatrix * vec4(eyeDirection, 0.0)).xyz;
-    vec3  halfLE    = normalize(invLight + invEye);
-    float diffuse   = clamp(dot(vNormal, invLight), 0.0, 1.0);
-    float specular  = pow(clamp(dot(vNormal, halfLE), 0.0, 1.0), 50.0);
-    vec4  destColor = vColor * vec4(vec3(diffuse), 1.0) + vec4(vec3(specular), 1.0) + ambientColor;
-    gl_FragColor    = destColor;
+    vec4 smpColor = texture2D(texture, vTextureCoord);
+    gl_FragColor    = vColor * smpColor;
 }`;
 
 
@@ -53,38 +47,57 @@ function main() {
 
     gl = getWebGLContext(canvas);
 
-    // カリングと深度テストを有効に 	
-    gl.enable(gl.DEPTH_TEST);
-    gl.depthFunc(gl.LEQUAL);
-    gl.enable(gl.CULL_FACE);
-    
     var program = initShaders(gl, VSHADER_SRC, FSHADER_SRC);
 
     // attributeLocationの取得
     var attLocation = new Array();
     attLocation[0] = gl.getAttribLocation(program, "position");
-    attLocation[1] = gl.getAttribLocation(program, "normal");
-    attLocation[2] = gl.getAttribLocation(program, "color");
+    attLocation[1] = gl.getAttribLocation(program, "color");
+    attLocation[2] = gl.getAttribLocation(program, "textureCoord");
 
     // attributeの要素数(この要素はxyzの3要素)
     var attStride = new Array();
     attStride[0] = 3;
-    attStride[1] = 3;
-    attStride[2] = 4;
+    attStride[1] = 4;
+    attStride[2] = 2;
 
-    // トーラスのデータを作成する
-    var torusData = torus(32, 32, 1.0, 2.0);
-    var position = torusData[0];
-    var normal = torusData[1];
-    var color = torusData[2];
-    var index = torusData[3];
+    //  頂点の位置
+    var position = [
+        -1.0,  1.0,  0.0,
+         1.0,  1.0,  0.0,
+        -1.0, -1.0,  0.0,
+         1.0, -1.0,  0.0  
+    ]
+
+    // 頂点色
+    var color = [
+        1.0, 1.0, 1.0, 1.0,
+        1.0, 1.0, 1.0, 1.0,
+        1.0, 1.0, 1.0, 1.0,
+        1.0, 1.0, 1.0, 1.0
+    ]
+
+    // テクスチャ座標
+    var textureCoord = [
+        0.0, 0.0,
+        1.0, 0.0,
+        0.0, 1.0,
+        1.0, 1.0
+    ]
+
+    // 頂点インデックス
+    var index = [
+        0, 1, 2,
+        3, 2, 1
+    ]
 
     var position_vbo = createVBO(gl, position);
-    var normal_vbo = createVBO(gl, normal);
     var color_vbo = createVBO(gl, color);
+    var textureCoord_vbo = createVBO(gl, textureCoord);
+    var VBOList = [position_vbo, color_vbo, textureCoord_vbo];
     // attribute属性を有効にする
     // attribute属性を登録
-    set_attribute(gl, [position_vbo, normal_vbo, color_vbo], attLocation, attStride);
+    set_attribute(gl, VBOList, attLocation, attStride);
 
     // iboの作成
     var ibo = create_ibo(gl, index);
@@ -94,23 +107,25 @@ function main() {
     // uniformLocationの取得
     var uniLocation = new Array();
     uniLocation[0] = gl.getUniformLocation(program, 'mvpMatrix');
-    uniLocation[1] = gl.getUniformLocation(program, 'invMatrix');
-    uniLocation[2] = gl.getUniformLocation(program, 'lightDirection');
-    uniLocation[3] = gl.getUniformLocation(program, 'eyeDirection');
-    uniLocation[4] = gl.getUniformLocation(program, 'ambientColor');
+    uniLocation[1] = gl.getUniformLocation(program, 'texture');
 
     // ビュー変換行列
-    mat4.lookAt(vMatrix, [0.0, 0.0, 20.0], [0, 0, 0], [0, 1, 0]);
+    mat4.lookAt(vMatrix, [0.0, 2.0, 5.0], [0, 0, 0], [0, 1, 0]);
     // プロジェクション座標変換行列
     mat4.perspective(pMatrix, 45, canvas.width/canvas.height, 0.1, 1000);
     mat4.mul(tmpMatrix, pMatrix, vMatrix);
 
-    // 平行光源の向き
-    var lightDirection = new Float32Array([-0.5, 0.5, 0.5]);
-    // 環境光(ambientLight)の色設定
-    var ambientColor = new Float32Array([0.1, 0.1, 0.1, 1.0]);
-    // 視線ベクトル
-    var eyeDirection = new Float32Array([0.0, 0.0, 20.0]);
+    // 有効にするテクsチャユニットを指定
+    gl.activeTexture(gl.TEXTURE0);
+
+    texture = null;
+
+    create_texture(gl, "src/texture.png");
+
+    // カリングと深度テストを有効に 	
+    gl.enable(gl.DEPTH_TEST);
+    gl.depthFunc(gl.LEQUAL);
+    //gl.enable(gl.CULL_FACE);
 
     var render_count:number = 0;
     function render_update(timestamp: any) {
@@ -124,21 +139,20 @@ function main() {
 
         // ラジアンを算出
         var rad = (render_count%360) * Math.PI / 180;
+
+         // テクスチャをバインドする
+        gl.bindTexture(gl.TEXTURE_2D, texture);
+        
+        // uniform変数にテクスチャを登録
+        gl.uniform1i(uniLocation[1], 0);
         
         // モデル2はY軸を中心に回転する
         mat4.identity(mMatrix);
-        mat4.rotate(mMatrix, mMatrix, rad, [0, 1, 1]);    
+        mat4.rotate(mMatrix, mMatrix, rad, [0, 1, 0]);    
         // モデル2の座標変換行列と描画
         mat4.mul(mvpMatrix, tmpMatrix, mMatrix);
 
-        // 逆行列
-        mat4.invert(invMatrix, mMatrix);
-
         gl.uniformMatrix4fv(uniLocation[0], false, mvpMatrix);
-        gl.uniformMatrix4fv(uniLocation[1], false, invMatrix);
-        gl.uniform3fv(uniLocation[2], lightDirection);
-        gl.uniform3fv(uniLocation[3], eyeDirection);
-        gl.uniform4fv(uniLocation[4], lightDirection);
         gl.drawElements(gl.TRIANGLES, index.length, gl.UNSIGNED_SHORT, 0);
 
         gl.flush();
@@ -276,6 +290,29 @@ function hsva(h:number, s:number, v:number, a:number){
         color.push(r[i], g[i], b[i], a);
     }
     return color;
+}
+
+function create_texture(gl: WebGLRenderingContext, source: string) {
+    var img = new Image();
+    img.onload = ()=> {
+        // テクスチャオブジェクトを生成
+        var tex = gl.createTexture();
+
+        // テクスチャをバインドする
+        gl.bindTexture(gl.TEXTURE_2D, tex);
+
+        // テクスチャへイメージを適用
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
+
+        // ミップマップを生成
+        gl.generateMipmap(gl.TEXTURE_2D);
+
+        // テクスチャバインドを無効化
+        gl.bindTexture(gl.TEXTURE_2D, null);
+
+        texture = tex;
+    }
+    img.src = source;
 }
 
 main();
